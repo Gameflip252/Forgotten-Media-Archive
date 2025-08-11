@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Forgotten Media Archive</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; background: #222; color: #eee; margin: 0; padding: 0; }
+    header { background: #333; padding: 1em 0; text-align: center; }
+    h1 { margin: 0; font-family: 'Georgia', serif; font-size: 2em; }
+    .main-layout { display: flex; gap: 0; }
+    .sidebar {
+      min-width: 220px;
+      background: #333;
+      padding: 1em 0.4em;
+      border-right: 2px solid #222;
+      height: calc(100vh - 120px);
+      overflow-y: auto;
+      position: sticky;
+      top: 0;
+    }
+    .sidebar-title { font-weight: bold; color: #8ecae6; margin-bottom: 0.8em; text-align: center; }
+    .sidebar-list { list-style: none; padding: 0; margin: 0; }
+    .sidebar-list li {
+      margin-bottom: 0.1em;
+      padding: 0.4em 0.5em;
+      border-radius: 5px;
+      cursor: pointer;
+      color: #eee;
+      transition: background 0.15s;
+    }
+    .sidebar-list li:hover, .sidebar-list li.active {
+      background: #8ecae6;
+      color: #222;
+    }
+    .content-area { flex: 1; padding: 0 0 0 0; }
+    .btn-group { display: flex; justify-content: center; gap: 1em; margin: 1.5em 0; }
+    .filter-btn, .credits-btn {
+      background: #444; color: #eee; border: none; padding: 0.7em 2em; border-radius: 6px;
+      font-size: 1.1em; cursor: pointer; transition: background 0.2s;
+    }
+    .filter-btn.active, .filter-btn:hover, .credits-btn:hover { background: #8ecae6; color: #222; }
+    .media-container { display: flex; flex-wrap: wrap; gap: 1em; justify-content: center; margin: 2em; }
+    .media-item { background: #444; padding: 1em; border-radius: 8px; max-width: 300px; text-align: center; }
+    .media-item img, .media-item video { max-width: 100%; border-radius: 4px; }
+    .media-item a { color: #8ecae6; text-decoration: none; }
+    .media-label { font-weight: bold; margin-bottom: 0.5em; display: block; }
+    #search-bar-container { display: flex; justify-content: center; margin: 1em 0; }
+    #search-bar { font-size: 1em; padding: 0.5em 1em; border-radius: 6px; border: 1px solid #666; background: #333; color: #eee; width: 300px; }
+    #credits-modal {
+      display: none;
+      position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7);
+      justify-content: center; align-items: center; z-index: 1000;
+    }
+    #credits-content {
+      background: #333; color: #eee; padding: 2em 2em; border-radius: 12px; max-width: 400px; text-align: center; box-shadow: 0 0 20px #000;
+    }
+    #close-credits {
+      background: #8ecae6; color: #222; border: none; padding: 0.5em 1.2em; border-radius: 6px; font-size: 1em; cursor: pointer; margin-top: 1.2em;
+    }
+    @media (max-width: 850px) {
+      .main-layout { flex-direction: column; }
+      .sidebar { height: auto; min-width: unset; border-right: none; border-bottom: 2px solid #222; }
+      .content-area { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Forgotten Media Archive</h1>
+    <p>
+      Upload files to the <code>movies</code>, <code>games</code>, or <code>images</code> folders of your repository.<br>
+      Select the category below to browse your archive.
+    </p>
+  </header>
+  <div class="btn-group" id="button-group">
+    <button class="filter-btn active" data-folder="movies">Movies</button>
+    <button class="filter-btn" data-folder="games">Games</button>
+    <button class="filter-btn" data-folder="images">Images</button>
+    <button class="credits-btn" id="credits-btn">Credits</button>
+  </div>
+  <div id="search-bar-container" style="display:none;">
+    <input type="text" id="search-bar" placeholder="Search movies by filename...">
+  </div>
+  <div class="main-layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-title" id="sidebar-title">Movies List</div>
+      <ul class="sidebar-list" id="sidebar-list"></ul>
+    </aside>
+    <div class="content-area">
+      <section class="media-container" id="media-container">
+        <!-- Media files will be listed here -->
+      </section>
+    </div>
+  </div>
+  <div id="credits-modal">
+    <div id="credits-content">
+      <h2>Credits</h2>
+      <p>
+        Created by the Forgotten Media Organization<br>
+        and Gameflip Studio
+      </p>
+      <button id="close-credits">Close</button>
+    </div>
+  </div>
+  <script>
+    const OWNER = "Gameflip252";
+    const REPO = "forgotten-media-archive";
+
+    const FOLDER_MAP = {
+      "movies": "Movies",
+      "games": "Games",
+      "images": "Images"
+    };
+
+    function getFileType(name) {
+      const ext = name.split('.').pop().toLowerCase();
+      if (["png", "jpg", "jpeg", "gif", "bmp", "webp"].includes(ext)) return "image";
+      if (["mp4", "webm", "ogg", "mov"].includes(ext)) return "video";
+      if (ext === "zip") return "zip";
+      return "other";
+    }
+
+    async function fetchMediaFiles(folder) {
+      const apiUrl = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${folder}`;
+      const resp = await fetch(apiUrl);
+      if (!resp.ok) return [];
+      const files = await resp.json();
+      return files.filter(f => f.type === "file");
+    }
+
+    function createMediaItem(file, folder) {
+      const type = getFileType(file.name);
+      let preview;
+      if (type === "image") {
+        preview = `<img src="${file.download_url}" alt="${file.name}">`;
+      } else if (type === "video") {
+        preview = `<video controls src="${file.download_url}" poster="" preload="metadata"></video>`;
+      } else if (type === "zip") {
+        preview = `<a href="${file.download_url}" target="_blank">Download ZIP</a>`;
+      } else {
+        preview = `<a href="${file.download_url}" target="_blank">${file.name}</a>`;
+      }
+      return `<div class="media-item" data-filename="${file.name}">
+        <span class="media-label">${file.name}</span>
+        ${preview}
+      </div>`;
+    }
+
+    // Store media files for searching
+    let currentMediaFiles = [];
+    let currentFolder = "movies";
+    let currentFilteredFiles = [];
+    let lastClickedIndex = null;
+
+    async function showMedia(folder, searchTerm = "") {
+      const container = document.getElementById("media-container");
+      container.innerHTML = "<p>Loading...</p>";
+      currentFolder = folder;
+      const files = await fetchMediaFiles(folder);
+      currentMediaFiles = files;
+      let filteredFiles = files;
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        filteredFiles = files.filter(f => f.name.toLowerCase().includes(term));
+      }
+      currentFilteredFiles = filteredFiles;
+      if (!filteredFiles.length) {
+        container.innerHTML = `<p>No files in <b>${FOLDER_MAP[folder]}</b>${searchTerm ? " matching your search!" : " yet!"}</p>`;
+        updateSidebar(filteredFiles, folder);
+        return;
+      }
+      container.innerHTML = filteredFiles.map(f => createMediaItem(f, folder)).join("");
+      updateSidebar(filteredFiles, folder);
+
+      // Optional: Reset lastClickedIndex highlight
+      lastClickedIndex = null;
+
+      // Add anchor ids to items for sidebar navigation
+      document.querySelectorAll('.media-item').forEach((item, idx) => {
+        item.id = "media-item-" + idx;
+      });
+    }
+
+    // Sidebar list rendering and click navigation
+    function updateSidebar(files, folder) {
+      const sidebarList = document.getElementById("sidebar-list");
+      const sidebarTitle = document.getElementById("sidebar-title");
+      sidebarList.innerHTML = "";
+      sidebarTitle.textContent = FOLDER_MAP[folder] + " List";
+      if (!files.length) {
+        sidebarList.innerHTML = "<li style='color:#aaa;'>No files found</li>";
+        return;
+      }
+      files.forEach((file, idx) => {
+        const li = document.createElement("li");
+        li.textContent = file.name;
+        li.onclick = function() {
+          // Highlight in sidebar
+          document.querySelectorAll('.sidebar-list li').forEach(e => e.classList.remove('active'));
+          li.classList.add('active');
+          // Scroll to media item
+          const item = document.getElementById("media-item-" + idx);
+          if (item) {
+            item.scrollIntoView({behavior: "smooth", block: "center"});
+            // Optionally highlight the media item
+            document.querySelectorAll('.media-item').forEach(e => e.style.boxShadow = "");
+            item.style.boxShadow = "0 0 10px 2px #8ecae6";
+            setTimeout(() => {
+              item.style.boxShadow = "";
+            }, 1200);
+          }
+          lastClickedIndex = idx;
+        };
+        sidebarList.appendChild(li);
+      });
+    }
+
+    // Button event listeners
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+      btn.addEventListener("click", function() {
+        document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        const folder = btn.dataset.folder;
+        // Show search bar only for movies
+        document.getElementById("search-bar-container").style.display = folder === "movies" ? "flex" : "none";
+        document.getElementById("search-bar").value = "";
+        showMedia(folder);
+      });
+    });
+
+    // Credits button logic
+    document.getElementById("credits-btn").addEventListener("click", function() {
+      document.getElementById("credits-modal").style.display = "flex";
+    });
+    document.getElementById("close-credits").addEventListener("click", function() {
+      document.getElementById("credits-modal").style.display = "none";
+    });
+    // Close modal on background click
+    document.getElementById("credits-modal").addEventListener("click", function(e) {
+      if (e.target === this) {
+        document.getElementById("credits-modal").style.display = "none";
+      }
+    });
+
+    // Search bar event listener
+    document.getElementById("search-bar").addEventListener("input", function() {
+      const searchTerm = this.value;
+      showMedia(currentFolder, searchTerm);
+    });
+
+    // Initial load: Movies
+    document.getElementById("search-bar-container").style.display = "flex";
+    showMedia("movies");
+  </script>
+</body>
+</html>
